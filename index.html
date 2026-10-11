@@ -3,6 +3,9 @@
   MERA RAASTA — Personal Route Map (PWA)
   by Ankush New Vision
   ------------------------------------------------------------
+  v1.03 (2026-10-12)
+   - APK mein background GPS: screen off / jeb mein bhi raasta record (notification ke saath)
+   - App band hokar khule to chalu recording apne aap jud jaati hai
   v1.02 (2026-10-11)
    - Header mein ⟳ Refresh button (naya update + GPS dobara), Settings mein bhi
   v1.01 (2026-10-11)
@@ -251,7 +254,7 @@ select:focus,input[type=text]:focus{border-color:var(--brand2)}
         </div>
         <button class="btn" id="markBtn">📍 Yahan jagah save karo</button>
         <button class="btn red" id="recStopBtn">⏹ Stop & Save</button>
-        <div class="mute" style="margin-top:10px">⚠ Recording ke time app khula rakho, screen app khud on rakhega. App band/minimize karne par GPS ruk sakta hai.</div>
+        <div class="mute" id="recNote" style="margin-top:10px"></div>
       </div>
     </section>
 
@@ -286,7 +289,7 @@ select:focus,input[type=text]:focus{border-color:var(--brand2)}
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
 <script>
 'use strict';
-const VERSION='v1.02';
+const VERSION='v1.03';
 const $=s=>document.querySelector(s);
 const esc=s=>String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const uid=()=>Date.now().toString(36)+Math.random().toString(36).slice(2,6);
@@ -437,7 +440,11 @@ async function wake(on){
     else if(!on&&wakeLock&&!rec.on&&!nav.on){await wakeLock.release();wakeLock=null}
   }catch(e){}
 }
-document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible'&&(rec.on||nav.on))wake(true)});
+document.addEventListener('visibilitychange',()=>{
+  if(document.visibilityState!=='visible')return;
+  if(rec.on&&rec.native)nativeDrain();
+  if(nav.on||(rec.on&&!rec.native))wake(true);
+});
 
 /* voice */
 function speak(t){
@@ -504,29 +511,58 @@ function renderPlaces(){
 }
 
 /* ---------- recording ---------- */
-const rec={on:false,pts:[],dist:0,start:0,lastT:0,timer:null,n:0};
+const rec={on:false,pts:[],dist:0,start:0,lastT:0,timer:null,n:0,native:false};
+
+/* APK ki background GPS service (screen off par bhi record) — browser mein nahi hoti */
+const NATIVE=(()=>{try{return !!(window.ANVGeo&&ANVGeo.available())}catch(e){return false}})();
+let drainT=null;
+function nativeDrain(){
+  if(!NATIVE)return;
+  let arr=[];try{arr=JSON.parse(ANVGeo.drain()||'[]')}catch(e){}
+  if(!rec.on||!rec.native)return;
+  arr.forEach(p=>addRecPt(p[0],p[1],p[2],p[3]));
+}
+function nativeStart(fresh){
+  if(fresh){try{ANVGeo.drain()}catch(e){}} // purane bache points hatao
+  try{ANVGeo.start()}catch(e){rec.native=false;return}
+  clearInterval(drainT);drainT=setInterval(nativeDrain,2000);
+}
+function nativeStop(){clearInterval(drainT);drainT=null;try{ANVGeo.stop()}catch(e){}}
+window.onAnvGeo=ok=>{
+  if(ok)return;
+  rec.native=false;nativeStop();setRecNote();
+  if(rec.on){wake(true);toast('Background GPS nahi chala — screen on rakh kar record karo',4000)}
+};
+function setRecNote(){
+  $('#recNote').innerHTML=rec.native
+    ?'📲 <b>Background recording ON</b> — ab screen off karke ya phone jeb mein rakh kar chal sakte ho. Notification bar mein "Raasta record ho raha hai" dikhega.'
+    :'⚠ Recording ke time app khula aur screen on rakho (app khud on rakhega). Screen off / minimize karne par GPS ruk jata hai.'+(NATIVE?'':' Screen off par record chahiye to APK version use karo.');
+}
+
 function recStart(resume){
   if(!resume){rec.pts=[];rec.dist=0;rec.start=Date.now()}
-  rec.on=true;rec.lastT=0;
+  rec.on=true;rec.lastT=0;rec.native=NATIVE;
   if(!recLine)recLine=L.polyline(rec.pts,{className:'recl',weight:6,opacity:.9,interactive:false}).addTo(map);else recLine.setLatLngs(rec.pts);
   $('#recIdle').hidden=true;$('#recLive').hidden=false;
   clearInterval(rec.timer);rec.timer=setInterval(updRecUI,1000);updRecUI();
-  if(me)recPoint();
-  wake(true);follow=true;updFollow();
+  if(rec.native)nativeStart(!resume);
+  else{if(me)recPoint();wake(true)}
+  setRecNote();follow=true;updFollow();
   toast(resume?'Recording phir se chalu':'⏺ Recording shuru — chalna shuru karo');
 }
-function recPoint(){
-  if(!me||me.acc>50)return;
-  const pt=[+me.lat.toFixed(6),+me.lng.toFixed(6)];
+function recPoint(){if(rec.native||!me)return;addRecPt(me.lat,me.lng,me.acc,me.t)}
+function addRecPt(lat,lng,acc,t){
+  if(acc>50)return;
+  const pt=[+(+lat).toFixed(6),+(+lng).toFixed(6)];
   const last=rec.pts[rec.pts.length-1];
   if(last){
     const d=dist(last,pt);
     if(d<5)return;
-    const dt=(me.t-rec.lastT)/1000;
+    const dt=(t-rec.lastT)/1000;
     if(rec.lastT&&dt>0&&d/dt>45)return; // GPS jump (>160 km/h) ignore
     rec.dist+=d;
   }
-  rec.pts.push(pt);rec.lastT=me.t;
+  rec.pts.push(pt);rec.lastT=t;
   recLine&&recLine.setLatLngs(rec.pts);
   saveDraft();updRecUI();
 }
@@ -539,11 +575,13 @@ function updRecUI(){
   $('#rAcc').textContent=me?'±'+Math.round(me.acc):'—';
 }
 function recEndUI(){
-  rec.on=false;clearInterval(rec.timer);
+  if(rec.native)nativeStop();
+  rec.on=false;rec.native=false;clearInterval(rec.timer);
   if(recLine){map.removeLayer(recLine);recLine=null}
   $('#recIdle').hidden=false;$('#recLive').hidden=true;wake(false);
 }
 async function recStop(){
+  nativeDrain();
   if(rec.pts.length<2){
     if(await confirmBox('Raasta bahut chhota','Abhi tak koi raasta record nahi hua (GPS ya chalna kam). Recording band karein?','Band karo')){
       recEndUI();localStorage.removeItem(LS.draft)}
@@ -848,6 +886,11 @@ startGPS();
 setInterval(()=>{if(!nav.on&&!rec.on&&document.querySelector('#s-nav.act')&&document.activeElement.tagName!=='SELECT')renderNavSelects()},20000);
 (async()=>{ // adhuri recording?
   const d=load(LS.draft,null);
+  let svcOn=false;try{svcOn=NATIVE&&ANVGeo.isRunning()}catch(e){}
+  if(svcOn){ // background service abhi bhi record kar rahi hai — seedha wahin se chalu
+    rec.pts=(d&&d.pts)||[];rec.dist=(d&&d.dist)||0;rec.start=(d&&d.start)||Date.now();
+    showTab('rec');recStart(true);nativeDrain();return;
+  }
   if(d&&d.pts&&d.pts.length>=2){
     const r=await modal('Adhuri recording mili',`<div class="mute">Pichli recording (${fmtDist(d.dist||0)}) save nahi hui thi.</div>`,
       [{label:'🗑 Hatao',v:'del',cls:'alt'},{label:'↩ Chalu',v:'cont',cls:'alt'},{label:'Save',v:'save'}]);

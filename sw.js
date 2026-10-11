@@ -1,7 +1,7 @@
-/* Mera Raasta — service worker v1.02
+/* Mera Raasta — service worker v1.03
    App files: network-first (naya update turant), offline par cache se.
    Map tiles + Leaflet: cache-first, taaki dekha hua map bina net ke bhi khule. */
-const CACHE = 'meraraasta-v1.02';
+const CACHE = 'meraraasta-v1.03';
 const TILES = 'meraraasta-tiles';
 const MAX_TILES = 2500;
 const SHELL = ['./', './index.html', './manifest.json', './icon-192.png', './icon-512.png'];
