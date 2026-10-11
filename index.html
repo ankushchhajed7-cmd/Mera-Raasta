@@ -3,6 +3,8 @@
   MERA RAASTA — Personal Route Map (PWA)
   by Ankush New Vision
   ------------------------------------------------------------
+  v1.02 (2026-10-11)
+   - Header mein ⟳ Refresh button (naya update + GPS dobara), Settings mein bhi
   v1.01 (2026-10-11)
    - GPS na mile to saaf steps + "Dobara try karo" button
    - 12 sec mein GPS fix na mile to tower/WiFi wali andaazan location
@@ -52,6 +54,11 @@ header .sp{flex:1}
 .pill{font-size:11px;padding:4px 8px;border-radius:20px;background:rgba(255,255,255,.15);display:flex;align-items:center;gap:5px;white-space:nowrap}
 .pill i{width:8px;height:8px;border-radius:50%;background:#aaa;display:inline-block}
 .pill.good i{background:#3ce08f}.pill.ok i{background:#ffd34d}.pill.weak i{background:#ff8a4d}.pill.bad i{background:#ff4d4d}
+.rbtn{width:34px;height:34px;flex:none;border:0;border-radius:50%;background:rgba(255,255,255,.15);color:#fff;font-size:20px;line-height:1;display:flex;align-items:center;justify-content:center}
+.rbtn:active{background:rgba(255,255,255,.3)}
+.pill{min-width:0;overflow:hidden}.pill span{overflow:hidden;text-overflow:ellipsis}
+.hbtn{flex:none;white-space:nowrap}
+@media (max-width:420px){header .ver{display:none}.hbtn .t{display:none}.hbtn{padding:7px 11px;font-size:14px}.pill{max-width:120px}header h1{font-size:16px}}
 .hbtn{background:#fff;color:var(--brand);border:0;border-radius:18px;padding:6px 11px;font-size:12px;font-weight:700}
 
 /* map */
@@ -170,7 +177,8 @@ select:focus,input[type=text]:focus{border-color:var(--brand2)}
   <h1>Mera Raasta<span class="ver" id="ver"></span></h1>
   <div class="sp"></div>
   <div class="pill bad" id="gpsPill"><i></i><span>GPS…</span></div>
-  <button class="hbtn" id="installBtn" hidden>⬇ Install</button>
+  <button class="rbtn" id="refreshBtn" title="Refresh" aria-label="Refresh">⟳</button>
+  <button class="hbtn" id="installBtn" hidden title="Install">⬇<span class="t"> Install</span></button>
 </header>
 
 <div id="map"></div>
@@ -265,6 +273,7 @@ select:focus,input[type=text]:focus{border-color:var(--brand2)}
       </div>
       <input type="file" id="impFile" accept="application/json,.json" hidden>
       <button class="btn alt sm" id="install2Btn">📲 App install karo</button>
+      <button class="btn alt sm" id="refresh2Btn">🔄 Refresh / naya update lo</button>
       <div class="mute" style="text-align:center;margin-top:12px">Mera Raasta <span id="ver2"></span> · Ankush New Vision<br>Map © OpenStreetMap contributors</div>
     </section>
 
@@ -277,7 +286,7 @@ select:focus,input[type=text]:focus{border-color:var(--brand2)}
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
 <script>
 'use strict';
-const VERSION='v1.01';
+const VERSION='v1.02';
 const $=s=>document.querySelector(s);
 const esc=s=>String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const uid=()=>Date.now().toString(36)+Math.random().toString(36).slice(2,6);
@@ -408,7 +417,7 @@ function onGpsErr(e){
   if(e.code!==1&&me&&Date.now()-me.t<60000)return; // fix pehle se hai, chhoti rukawat ignore
   const retry='<button class="btn sm" onclick="retryGPS()">🔄 Dobara try karo</button>';
   if(e.code===1){
-    setGps('bad','Permission nahi');
+    setGps('bad','Ijazat nahi');
     $('#gpsWarn').innerHTML='<div class="warn">📍 <b>Location permission band hai.</b><br>Chrome mein address bar ke 🔒 icon → <b>Permissions → Location → Allow</b> karo. Phone ki Location (GPS) bhi ON honi chahiye.'+retry+'</div>';
   }else{
     setGps(e.code===2?'bad':'weak',e.code===2?'Signal nahi':'GPS dhoondh raha…');
@@ -819,6 +828,18 @@ async function doInstall(){
 }
 $('#installBtn').onclick=doInstall;$('#install2Btn').onclick=doInstall;
 if(!standalone())setTimeout(()=>{if(!deferredPrompt)$('#installBtn').hidden=false},4000);
+
+/* ---------- refresh ---------- */
+async function hardRefresh(){
+  if(rec.on){
+    if(!await confirmBox('Recording chal rahi hai','Refresh ke baad recording wahin se "Chalu" kar sakte ho (ab tak ka raasta save rahega). Refresh karein?','Refresh'))return;
+    saveDraft(true);
+  }
+  toast('🔄 Refresh ho raha hai…');
+  try{if('serviceWorker' in navigator){const r=await navigator.serviceWorker.getRegistration();if(r)await r.update()}}catch(e){}
+  setTimeout(()=>location.reload(),300);
+}
+$('#refreshBtn').onclick=hardRefresh;$('#refresh2Btn').onclick=hardRefresh;
 
 /* ---------- start ---------- */
 $('#ver').textContent=' '+VERSION;$('#ver2').textContent=VERSION;
