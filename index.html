@@ -1,0 +1,826 @@
+<!DOCTYPE html>
+<!--
+  MERA RAASTA — Personal Route Map (PWA)
+  by Ankush New Vision
+  ------------------------------------------------------------
+  v1.00 (2026-10-11)
+   - GPS se raasta record karna (A→B→C→D), beech mein jagah mark karna
+   - Saare recorded raaston ka network (graph) + shortest path (Dijkstra)
+   - Kahin se bhi destination batao → apne raaston par route
+   - Live navigation: Hindi voice, turn alerts, off-route par re-route
+   - Jagah / Raaste manage, backup export/import, install button
+   - Offline: app + dekhe hue map tiles cache
+-->
+<html lang="hi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#0b5d4e">
+<meta name="description" content="Apne record kiye raaston par navigation — Mera Raasta">
+<title>Mera Raasta</title>
+<link rel="manifest" href="manifest.json">
+<link rel="icon" type="image/png" href="icon-192.png">
+<link rel="apple-touch-icon" href="icon-192.png">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
+<style>
+:root{
+  --bg:#f4f6f5;--card:#ffffff;--ink:#13221e;--mute:#5d6d68;--line:#e1e7e4;
+  --brand:#0b5d4e;--brand2:#12a383;--accent:#ff7a1a;--danger:#d64545;
+  --track:#3b7ddd;--route:#12a383;--rec:#e0392b;--soft:#eaf5f1;
+  --hdr:52px;--panelH:260px;
+}
+@media (prefers-color-scheme:dark){
+  :root{--bg:#0e1614;--card:#16201e;--ink:#e6eeeb;--mute:#93a39e;--line:#26332f;--soft:#1b2c28}
+}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{margin:0;height:100%;overflow:hidden;background:var(--bg);color:var(--ink);
+  font-family:system-ui,-apple-system,"Segoe UI",Roboto,"Noto Sans",sans-serif;font-size:15px}
+button{font:inherit;cursor:pointer}
+input,select{font:inherit;color:var(--ink)}
+
+/* header */
+header{position:fixed;top:0;left:0;right:0;height:var(--hdr);z-index:1000;display:flex;align-items:center;gap:8px;
+  padding:0 10px;padding-top:env(safe-area-inset-top);background:var(--brand);color:#fff}
+header img{width:30px;height:30px;border-radius:8px}
+header h1{font-size:17px;margin:0;font-weight:700;letter-spacing:.2px;white-space:nowrap}
+header .ver{font-size:10px;opacity:.75;margin-left:2px}
+header .sp{flex:1}
+.pill{font-size:11px;padding:4px 8px;border-radius:20px;background:rgba(255,255,255,.15);display:flex;align-items:center;gap:5px;white-space:nowrap}
+.pill i{width:8px;height:8px;border-radius:50%;background:#aaa;display:inline-block}
+.pill.good i{background:#3ce08f}.pill.ok i{background:#ffd34d}.pill.weak i{background:#ff8a4d}.pill.bad i{background:#ff4d4d}
+.hbtn{background:#fff;color:var(--brand);border:0;border-radius:18px;padding:6px 11px;font-size:12px;font-weight:700}
+
+/* map */
+#map{position:fixed;left:0;right:0;top:var(--hdr);bottom:var(--panelH);z-index:1;background:#dfe6e3}
+.leaflet-control-attribution{font-size:9px!important}
+
+/* floating buttons */
+.fabs{position:fixed;right:10px;bottom:calc(var(--panelH) + 12px);z-index:900;display:flex;flex-direction:column;gap:8px}
+.fab{width:44px;height:44px;border-radius:50%;border:0;background:var(--card);color:var(--ink);
+  box-shadow:0 2px 10px rgba(0,0,0,.25);font-size:19px;display:flex;align-items:center;justify-content:center}
+.fab.on{background:var(--brand2);color:#fff}
+
+/* bottom panel */
+#panel{position:fixed;left:0;right:0;bottom:0;z-index:950;background:var(--card);border-radius:18px 18px 0 0;
+  box-shadow:0 -4px 18px rgba(0,0,0,.18);display:flex;flex-direction:column;max-height:52vh;
+  padding-bottom:env(safe-area-inset-bottom)}
+#handle{padding:7px 0 3px;display:flex;justify-content:center}
+#handle span{width:42px;height:5px;border-radius:5px;background:var(--line)}
+.tabs{display:flex;border-bottom:1px solid var(--line)}
+.tabs button{flex:1;background:none;border:0;padding:8px 2px 9px;color:var(--mute);font-size:12px;font-weight:600;
+  display:flex;flex-direction:column;align-items:center;gap:2px;border-bottom:3px solid transparent}
+.tabs button b{font-size:18px;line-height:1}
+.tabs button.act{color:var(--brand2);border-bottom-color:var(--brand2)}
+.body{overflow-y:auto;padding:12px 14px 14px;-webkit-overflow-scrolling:touch}
+#panel.min .body{display:none}
+.sec{display:none}.sec.act{display:block}
+
+label.l{display:block;font-size:12px;color:var(--mute);margin:8px 0 4px;font-weight:600}
+select,input[type=text]{width:100%;padding:11px 12px;border:1px solid var(--line);border-radius:12px;background:var(--bg);outline:none}
+select:focus,input[type=text]:focus{border-color:var(--brand2)}
+.row{display:flex;gap:8px;align-items:center}
+.row>*{flex:1}
+.btn{width:100%;border:0;border-radius:12px;padding:13px;font-weight:700;font-size:15px;background:var(--brand2);color:#fff;margin-top:12px}
+.btn.alt{background:var(--soft);color:var(--brand)}
+.btn.red{background:var(--rec)}
+.btn.sm{padding:9px;font-size:13px;margin-top:8px}
+.btn:disabled{opacity:.5}
+.chips{display:flex;gap:6px}
+.chip{flex:1;border:1px solid var(--line);background:var(--bg);color:var(--ink);border-radius:20px;padding:8px 4px;font-size:13px;font-weight:600}
+.chip.act{background:var(--brand);color:#fff;border-color:var(--brand)}
+.card{background:var(--soft);border-radius:14px;padding:12px;margin-top:12px}
+.big{font-size:22px;font-weight:800}
+.mute{color:var(--mute);font-size:12.5px;line-height:1.45}
+.warn{background:#fff3e6;color:#8a4a00;border-radius:12px;padding:10px 12px;font-size:13px;margin-bottom:10px;line-height:1.4}
+@media (prefers-color-scheme:dark){.warn{background:#3a2a14;color:#ffcf99}}
+.empty{text-align:center;padding:18px 8px;color:var(--mute);font-size:13.5px;line-height:1.5}
+
+.list .it{display:flex;align-items:center;gap:10px;padding:10px 0;border-bottom:1px solid var(--line)}
+.list .it:last-child{border-bottom:0}
+.av{width:34px;height:34px;border-radius:50%;background:var(--accent);color:#fff;font-weight:800;font-size:13px;
+  display:flex;align-items:center;justify-content:center;flex:none}
+.av.tr{background:var(--track)}
+.it .tx{flex:1;min-width:0}
+.it .tx b{display:block;font-size:14.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.it .tx small{color:var(--mute);font-size:12px}
+.ib{border:0;background:var(--bg);color:var(--ink);border-radius:10px;width:34px;height:34px;font-size:15px;flex:none}
+.ib.go{background:var(--brand2);color:#fff;width:auto;padding:0 10px;font-size:12.5px;font-weight:700}
+
+.stats{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:10px}
+.stats div{background:var(--bg);border-radius:12px;padding:9px 6px;text-align:center}
+.stats b{display:block;font-size:17px}
+.stats small{font-size:11px;color:var(--mute)}
+.recdot{display:inline-block;width:10px;height:10px;border-radius:50%;background:var(--rec);margin-right:6px;animation:bl 1s infinite}
+@keyframes bl{50%{opacity:.25}}
+
+.setrow{display:flex;align-items:center;justify-content:space-between;padding:11px 0;border-bottom:1px solid var(--line)}
+.sw{position:relative;width:46px;height:26px;flex:none}
+.sw input{opacity:0;width:0;height:0}
+.sw span{position:absolute;inset:0;background:var(--line);border-radius:26px;transition:.2s}
+.sw span:before{content:"";position:absolute;width:20px;height:20px;left:3px;top:3px;background:#fff;border-radius:50%;transition:.2s}
+.sw input:checked+span{background:var(--brand2)}
+.sw input:checked+span:before{transform:translateX(20px)}
+
+/* nav banner */
+#navBar{position:fixed;left:8px;right:8px;top:calc(var(--hdr) + 8px);z-index:960;background:var(--brand);color:#fff;
+  border-radius:16px;padding:10px 12px;display:none;box-shadow:0 4px 16px rgba(0,0,0,.3)}
+#navBar.on{display:block}
+#navBar .top{display:flex;align-items:center;gap:12px}
+#navBar .arr{font-size:40px;line-height:1;width:48px;text-align:center}
+#navBar .d{font-size:24px;font-weight:800}
+#navBar .ins{font-size:14px;opacity:.95}
+#navBar .bot{display:flex;justify-content:space-between;align-items:center;margin-top:8px;padding-top:8px;border-top:1px solid rgba(255,255,255,.2);font-size:13px}
+#navBar .x{background:#fff;color:var(--danger);border:0;border-radius:14px;padding:6px 12px;font-weight:800;font-size:12.5px}
+
+/* markers */
+.pin{position:relative;width:30px;height:30px;border-radius:50% 50% 50% 0;transform:rotate(-45deg);background:var(--accent);
+  border:2px solid #fff;box-shadow:0 2px 6px rgba(0,0,0,.35)}
+.pin span{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;transform:rotate(45deg);color:#fff;font-weight:800;font-size:11px}
+.pin.dest{background:var(--danger)}
+.ptag{position:absolute;left:50%;top:34px;transform:translateX(-50%);background:rgba(255,255,255,.92);color:#13221e;font-size:11px;
+  font-weight:700;padding:1px 6px;border-radius:6px;white-space:nowrap;box-shadow:0 1px 3px rgba(0,0,0,.2)}
+.me{width:18px;height:18px;border-radius:50%;background:#2a7cff;border:3px solid #fff;box-shadow:0 0 0 6px rgba(42,124,255,.25)}
+.trk{stroke:var(--track)}
+.rt{stroke:var(--route)}
+.rtcase{stroke:#fff}
+.gap{stroke:var(--accent)}
+.recl{stroke:var(--rec)}
+
+/* modal + toast */
+#mask{position:fixed;inset:0;z-index:2000;background:rgba(0,0,0,.45);display:none;align-items:flex-end;justify-content:center}
+#mask.on{display:flex}
+#dlg{background:var(--card);width:100%;max-width:520px;border-radius:20px 20px 0 0;padding:18px 16px calc(16px + env(safe-area-inset-bottom));
+  max-height:85vh;overflow-y:auto}
+#dlg h3{margin:0 0 6px;font-size:18px}
+#dlg .bts{display:flex;gap:8px;margin-top:14px}
+#dlg .bts .btn{margin-top:0}
+#toast{position:fixed;left:50%;bottom:calc(var(--panelH) + 70px);transform:translateX(-50%);z-index:2100;background:#13221e;color:#fff;
+  padding:10px 16px;border-radius:22px;font-size:13.5px;max-width:88vw;text-align:center;opacity:0;pointer-events:none;transition:opacity .25s}
+#toast.on{opacity:1}
+</style>
+</head>
+<body>
+
+<header>
+  <img src="icon-192.png" alt="">
+  <h1>Mera Raasta<span class="ver" id="ver"></span></h1>
+  <div class="sp"></div>
+  <div class="pill bad" id="gpsPill"><i></i><span>GPS…</span></div>
+  <button class="hbtn" id="installBtn" hidden>⬇ Install</button>
+</header>
+
+<div id="map"></div>
+
+<div class="fabs">
+  <button class="fab" id="fitBtn" title="Saare raaste dikhao">⤢</button>
+  <button class="fab on" id="locBtn" title="Meri location">◎</button>
+</div>
+
+<div id="navBar">
+  <div class="top">
+    <div class="arr" id="nArr">↑</div>
+    <div><div class="d" id="nDist">—</div><div class="ins" id="nIns">Seedha chalo</div></div>
+  </div>
+  <div class="bot">
+    <span id="nRem">—</span>
+    <button class="x" id="nStop">✕ Band karo</button>
+  </div>
+</div>
+
+<div id="panel">
+  <div id="handle"><span></span></div>
+  <div class="tabs" id="tabs">
+    <button data-t="nav" class="act"><b>🧭</b>Chalo</button>
+    <button data-t="rec"><b>⏺</b>Record</button>
+    <button data-t="plc"><b>📍</b>Jagah</button>
+    <button data-t="trk"><b>🛣</b>Raaste</button>
+  </div>
+  <div class="body">
+
+    <div id="gpsWarn"></div>
+
+    <!-- NAVIGATE -->
+    <section class="sec act" id="s-nav">
+      <div id="navEmpty" class="empty" hidden>
+        Abhi koi raasta record nahi hua.<br>
+        <b>Record</b> tab mein jao → <b>Start</b> dabao → chalo.<br>
+        Har jagah (A, B, C…) par <b>"Yahan jagah save karo"</b> dabao.
+      </div>
+      <div id="navForm">
+        <label class="l">Kahan jana hai?</label>
+        <select id="destSel"></select>
+        <label class="l">Kahan se?</label>
+        <select id="fromSel"></select>
+        <label class="l">Kaise ja rahe ho?</label>
+        <div class="chips" id="modeChips">
+          <button class="chip" data-m="walk">🚶 Paidal</button>
+          <button class="chip" data-m="bike">🏍 Bike</button>
+          <button class="chip" data-m="car">🚗 Car</button>
+        </div>
+        <button class="btn" id="showRouteBtn">Raasta dikhao</button>
+        <div id="routeCard"></div>
+      </div>
+    </section>
+
+    <!-- RECORD -->
+    <section class="sec" id="s-rec">
+      <div id="recIdle">
+        <div class="mute">Map on rakh kar chalo — app aapka raasta GPS se record karega. Har ruk-ne wali jagah par
+          <b>"Yahan jagah save karo"</b> dabao (jaise A, B, C, D). Baad mein kahin se bhi kisi bhi jagah ka raasta mil jayega.</div>
+        <button class="btn red" id="recStartBtn">⏺ Recording Start</button>
+        <button class="btn alt sm" id="markIdleBtn">📍 Abhi wali jagah save karo</button>
+      </div>
+      <div id="recLive" hidden>
+        <div class="row" style="justify-content:space-between"><b><span class="recdot"></span>Recording chal rahi hai</b></div>
+        <div class="stats">
+          <div><b id="rDist">0 m</b><small>Doori</small></div>
+          <div><b id="rTime">0:00</b><small>Samay</small></div>
+          <div><b id="rAcc">—</b><small>GPS</small></div>
+        </div>
+        <button class="btn" id="markBtn">📍 Yahan jagah save karo</button>
+        <button class="btn red" id="recStopBtn">⏹ Stop & Save</button>
+        <div class="mute" style="margin-top:10px">⚠ Recording ke time app khula rakho, screen app khud on rakhega. App band/minimize karne par GPS ruk sakta hai.</div>
+      </div>
+    </section>
+
+    <!-- PLACES -->
+    <section class="sec" id="s-plc">
+      <button class="btn alt sm" id="addHereBtn" style="margin-top:0">＋ Meri abhi ki location save karo</button>
+      <div class="mute" style="margin:8px 0 4px">Tip: Map par kisi jagah ko dabakar rakho (long press) — wahan bhi jagah save ho jayegi.</div>
+      <div class="list" id="plcList"></div>
+    </section>
+
+    <!-- TRACKS + SETTINGS -->
+    <section class="sec" id="s-trk">
+      <div class="list" id="trkList"></div>
+      <div style="margin-top:14px;font-weight:700">Settings</div>
+      <div class="setrow"><span>🔊 Awaaz se raasta batao</span><label class="sw"><input type="checkbox" id="voiceTgl"><span></span></label></div>
+      <div class="row" style="margin-top:4px">
+        <button class="btn alt sm" id="expBtn">⬆ Backup</button>
+        <button class="btn alt sm" id="impBtn">⬇ Restore</button>
+      </div>
+      <input type="file" id="impFile" accept="application/json,.json" hidden>
+      <button class="btn alt sm" id="install2Btn">📲 App install karo</button>
+      <div class="mute" style="text-align:center;margin-top:12px">Mera Raasta <span id="ver2"></span> · Ankush New Vision<br>Map © OpenStreetMap contributors</div>
+    </section>
+
+  </div>
+</div>
+
+<div id="mask"><div id="dlg"></div></div>
+<div id="toast"></div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<script>
+'use strict';
+const VERSION='v1.00';
+const $=s=>document.querySelector(s);
+const esc=s=>String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const uid=()=>Date.now().toString(36)+Math.random().toString(36).slice(2,6);
+
+/* ---------- storage ---------- */
+const LS={places:'mr_places',tracks:'mr_tracks',draft:'mr_draft',settings:'mr_settings'};
+function load(k,d){try{const v=localStorage.getItem(k);return v?JSON.parse(v):d}catch(e){return d}}
+function save(k,v){try{localStorage.setItem(k,JSON.stringify(v));return true}catch(e){toast('Storage full! Backup lekar purane raaste delete karo');return false}}
+let places=load(LS.places,[]);
+let tracks=load(LS.tracks,[]);
+const settings=Object.assign({voice:true,mode:'bike',last:null},load(LS.settings,{}));
+const saveSettings=()=>save(LS.settings,settings);
+
+/* ---------- geo math ---------- */
+const RAD=Math.PI/180;
+function dist(a,b){const dLat=(b[0]-a[0])*RAD,dLng=(b[1]-a[1])*RAD;
+  const s=Math.sin(dLat/2)**2+Math.cos(a[0]*RAD)*Math.cos(b[0]*RAD)*Math.sin(dLng/2)**2;return 12742000*Math.asin(Math.min(1,Math.sqrt(s)))}
+function bearing(a,b){const y=Math.sin((b[1]-a[1])*RAD)*Math.cos(b[0]*RAD);
+  const x=Math.cos(a[0]*RAD)*Math.sin(b[0]*RAD)-Math.sin(a[0]*RAD)*Math.cos(b[0]*RAD)*Math.cos((b[1]-a[1])*RAD);
+  return (Math.atan2(y,x)/RAD+360)%360}
+const fmtDist=m=>m<1000?Math.round(m)+' m':(m/1000).toFixed(m<10000?2:1)+' km';
+function fmtDur(sec){const m=Math.max(1,Math.round(sec/60));return m<60?m+' min':Math.floor(m/60)+' ghanta '+(m%60)+' min'}
+const SPEED={walk:1.25,bike:6.5,car:8.5}; // m/s
+const MODE_NAME={walk:'Paidal',bike:'Bike',car:'Car'};
+const initials=n=>{const w=String(n).trim().split(/\s+/);return (w.length>1?w[0][0]+w[1][0]:String(n).slice(0,2)).toUpperCase()};
+const placeById=id=>places.find(p=>p.id===id);
+
+/* ---------- UI helpers ---------- */
+let toastT;
+function toast(t,ms){const el=$('#toast');el.textContent=t;el.classList.add('on');clearTimeout(toastT);toastT=setTimeout(()=>el.classList.remove('on'),ms||2600)}
+function modal(title,html,buttons){
+  return new Promise(res=>{
+    const d=$('#dlg');
+    d.innerHTML=`<h3>${esc(title)}</h3><div>${html||''}</div><div class="bts">`+
+      buttons.map((b,i)=>`<button class="btn ${b.cls||''}" data-i="${i}">${esc(b.label)}</button>`).join('')+`</div>`;
+    $('#mask').classList.add('on');
+    const first=d.querySelector('input[type=text]');if(first)setTimeout(()=>{first.focus();first.select()},80);
+    d.querySelectorAll('.bts button').forEach(btn=>btn.onclick=()=>{
+      const vals={};d.querySelectorAll('[data-k]').forEach(el=>vals[el.dataset.k]=el.value.trim());
+      $('#mask').classList.remove('on');res({v:buttons[+btn.dataset.i].v,vals});
+    });
+  });
+}
+async function ask(title,label,def){
+  const r=await modal(title,`<label class="l">${esc(label)}</label><input type="text" data-k="x" value="${esc(def||'')}">`,
+    [{label:'Cancel',v:0,cls:'alt'},{label:'Save',v:1}]);
+  return r.v&&r.vals.x?r.vals.x:null;
+}
+async function confirmBox(title,msg,ok,cls){
+  const r=await modal(title,`<div class="mute" style="font-size:14px">${msg}</div>`,[{label:'Nahi',v:0,cls:'alt'},{label:ok||'Haan',v:1,cls:cls||''}]);
+  return !!r.v;
+}
+
+/* ---------- map ---------- */
+const map=L.map('map',{zoomControl:false,attributionControl:false}).setView(settings.last||[21.0,78.0],settings.last?16:5);
+L.control.attribution({position:'topright',prefix:false}).addTo(map);
+L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:19,crossOrigin:'anonymous',
+  attribution:'© OpenStreetMap'}).addTo(map);
+const trackLayer=L.layerGroup().addTo(map);
+const routeLayer=L.layerGroup().addTo(map);
+const placeLayer=L.layerGroup().addTo(map);
+let recLine=null,meMarker=null,meCircle=null;
+
+function drawTracks(){
+  trackLayer.clearLayers();
+  tracks.forEach(t=>L.polyline(t.pts,{className:'trk',weight:5,opacity:.55,interactive:false}).addTo(trackLayer));
+}
+function drawPlaces(){
+  placeLayer.clearLayers();
+  places.forEach(p=>{
+    const dest=nav.destId===p.id;
+    const ic=L.divIcon({className:'',iconSize:[30,30],iconAnchor:[15,34],
+      html:`<div class="pin ${dest?'dest':''}"><span>${esc(initials(p.name))}</span></div><div class="ptag">${esc(p.name)}</div>`});
+    L.marker([p.lat,p.lng],{icon:ic}).addTo(placeLayer).on('click',()=>placeMenu(p.id));
+  });
+}
+function fitAll(){
+  const ll=[];tracks.forEach(t=>t.pts.forEach(p=>ll.push(p)));places.forEach(p=>ll.push([p.lat,p.lng]));
+  if(ll.length){follow=false;updFollow();map.fitBounds(L.latLngBounds(ll),{padding:[30,30],maxZoom:17})}
+  else toast('Abhi koi raasta saved nahi hai');
+}
+
+/* panel height → map bottom */
+const panel=$('#panel');
+function syncPanel(){document.documentElement.style.setProperty('--panelH',panel.offsetHeight+'px');map.invalidateSize({pan:false})}
+new ResizeObserver(syncPanel).observe(panel);
+$('#handle').onclick=()=>{panel.classList.toggle('min')};
+
+/* tabs */
+function showTab(t){
+  document.querySelectorAll('#tabs button').forEach(b=>b.classList.toggle('act',b.dataset.t===t));
+  document.querySelectorAll('.sec').forEach(s=>s.classList.toggle('act',s.id==='s-'+t));
+  panel.classList.remove('min');
+  if(t==='nav')renderNavSelects();if(t==='plc')renderPlaces();if(t==='trk')renderTracks();
+}
+document.querySelectorAll('#tabs button').forEach(b=>b.onclick=()=>showTab(b.dataset.t));
+
+/* ---------- GPS ---------- */
+let me=null,follow=true,lastSaveLoc=0,firstFix=true;
+function setGps(cls,txt){const p=$('#gpsPill');p.className='pill '+cls;p.querySelector('span').textContent=txt}
+function startGPS(){
+  if(!('geolocation' in navigator)){setGps('bad','GPS nahi');return}
+  navigator.geolocation.watchPosition(onPos,onGpsErr,{enableHighAccuracy:true,maximumAge:1000,timeout:25000});
+}
+function onPos(p){
+  const c=p.coords;
+  me={lat:c.latitude,lng:c.longitude,acc:c.accuracy,t:p.timestamp||Date.now()};
+  $('#gpsWarn').innerHTML='';
+  const ll=[me.lat,me.lng];
+  if(!meMarker){
+    meCircle=L.circle(ll,{radius:me.acc,color:'#2a7cff',weight:1,fillOpacity:.1,interactive:false}).addTo(map);
+    meMarker=L.marker(ll,{icon:L.divIcon({className:'',html:'<div class="me"></div>',iconSize:[18,18],iconAnchor:[9,9]}),zIndexOffset:1000,interactive:false}).addTo(map);
+  }else{meMarker.setLatLng(ll);meCircle.setLatLng(ll).setRadius(me.acc)}
+  if(firstFix){firstFix=false;map.setView(ll,17)}else if(follow)map.panTo(ll,{animate:true});
+  setGps(me.acc<=20?'good':me.acc<=50?'ok':'weak','±'+Math.round(me.acc)+' m');
+  if(Date.now()-lastSaveLoc>30000){lastSaveLoc=Date.now();settings.last=ll;saveSettings()}
+  if(rec.on)recPoint();
+  if(nav.on)navUpdate();
+}
+function onGpsErr(e){
+  if(e.code===1){setGps('bad','Permission nahi');
+    $('#gpsWarn').innerHTML='<div class="warn">📍 Location permission band hai. Chrome mein address bar ke 🔒 icon → <b>Permissions → Location → Allow</b> karo, phir app reload karo. Phone ki Location (GPS) bhi ON honi chahiye.</div>';}
+  else if(e.code===2)setGps('bad','Signal nahi');
+  else setGps('weak','GPS dhoondh raha…');
+}
+function updFollow(){$('#locBtn').classList.toggle('on',follow)}
+map.on('dragstart',()=>{follow=false;updFollow()});
+$('#locBtn').onclick=()=>{follow=true;updFollow();if(me)map.setView([me.lat,me.lng],Math.max(map.getZoom(),17));else toast('GPS signal ka intezaar…')};
+$('#fitBtn').onclick=fitAll;
+
+/* wake lock */
+let wakeLock=null;
+async function wake(on){
+  try{
+    if(on&&'wakeLock' in navigator&&!wakeLock){wakeLock=await navigator.wakeLock.request('screen');wakeLock.addEventListener('release',()=>{wakeLock=null})}
+    else if(!on&&wakeLock&&!rec.on&&!nav.on){await wakeLock.release();wakeLock=null}
+  }catch(e){}
+}
+document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible'&&(rec.on||nav.on))wake(true)});
+
+/* voice */
+function speak(t){
+  if(!settings.voice||!('speechSynthesis' in window))return;
+  try{speechSynthesis.cancel();const u=new SpeechSynthesisUtterance(t);u.lang='hi-IN';
+    const v=speechSynthesis.getVoices().find(v=>v.lang&&v.lang.toLowerCase().startsWith('hi'));if(v)u.voice=v;
+    u.rate=1;speechSynthesis.speak(u)}catch(e){}
+}
+if('speechSynthesis' in window)speechSynthesis.getVoices();
+
+/* ---------- places ---------- */
+function nearestPlace(ll,maxD){let best=null,bd=maxD;places.forEach(p=>{const d=dist(ll,[p.lat,p.lng]);if(d<bd){bd=d;best=p}});return best}
+function addPlace(name,lat,lng){
+  const p={id:uid(),name:name,lat:+lat.toFixed(6),lng:+lng.toFixed(6),at:Date.now()};
+  places.push(p);save(LS.places,places);G=null;drawPlaces();renderPlaces();renderNavSelects();return p;
+}
+const nextName=()=>{const L='ABCDEFGHIJKLMNOPQRSTUVWXYZ';const used=new Set(places.map(p=>p.name.toUpperCase()));
+  for(const c of L)if(!used.has(c))return c;return 'Jagah '+(places.length+1)};
+async function addPlaceAt(lat,lng,title){
+  const n=nearestPlace([lat,lng],25);
+  if(n&&!await confirmBox('Pass mein jagah hai',`"${esc(n.name)}" yahan se sirf ${Math.round(dist([lat,lng],[n.lat,n.lng]))} m door hai. Phir bhi nayi jagah banaye?`,'Haan, banao'))return null;
+  const name=await ask(title||'Nayi jagah','Jagah ka naam (jaise Ghar, Dukaan, A)',nextName());
+  if(!name)return null;
+  const p=addPlace(name,lat,lng);toast('📍 "'+name+'" save ho gaya');return p;
+}
+async function addHere(){
+  if(!me){toast('GPS signal ka intezaar…');return null}
+  if(me.acc>60)toast('GPS weak hai (±'+Math.round(me.acc)+' m), jagah thodi idhar-udhar ho sakti hai',3500);
+  const p=await addPlaceAt(me.lat,me.lng,'Yahan jagah save karo');
+  if(p&&rec.on){rec.pts.push([p.lat,p.lng]);recLine&&recLine.setLatLngs(rec.pts);saveDraft(true)}
+  return p;
+}
+map.on('contextmenu',e=>addPlaceAt(e.latlng.lat,e.latlng.lng,'Map par jagah save karo'));
+$('#addHereBtn').onclick=addHere;
+$('#markIdleBtn').onclick=addHere;
+$('#markBtn').onclick=addHere;
+
+async function placeMenu(id){
+  const p=placeById(id);if(!p)return;
+  const d=me?' · '+fmtDist(dist([me.lat,me.lng],[p.lat,p.lng]))+' door':'';
+  const r=await modal(p.name,`<div class="mute">Saved jagah${d}</div>`,
+    [{label:'✏ Naam',v:'ren',cls:'alt'},{label:'🗑',v:'del',cls:'alt'},{label:'🧭 Yahan jao',v:'go'}]);
+  if(r.v==='go')goTo(id);else if(r.v==='ren')renamePlace(id);else if(r.v==='del')delPlace(id);
+}
+async function renamePlace(id){const p=placeById(id);const n=await ask('Naam badlo','Naya naam',p.name);if(!n)return;
+  p.name=n;save(LS.places,places);drawPlaces();renderPlaces();renderTracks();renderNavSelects()}
+async function delPlace(id){const p=placeById(id);
+  if(!await confirmBox('Jagah delete?',`"${esc(p.name)}" hata dein? Raaste (lines) saved rahenge.`,'Delete','red'))return;
+  places=places.filter(x=>x.id!==id);save(LS.places,places);G=null;if(nav.destId===id)clearRoute();
+  drawPlaces();renderPlaces();renderNavSelects()}
+function goTo(id){showTab('nav');$('#destSel').value=id;$('#fromSel').value='gps';showRoute()}
+
+function renderPlaces(){
+  const el=$('#plcList');
+  if(!places.length){el.innerHTML='<div class="empty">Koi jagah saved nahi hai.</div>';return}
+  const arr=places.map(p=>({p,d:me?dist([me.lat,me.lng],[p.lat,p.lng]):null}));
+  if(me)arr.sort((a,b)=>a.d-b.d);
+  el.innerHTML=arr.map(({p,d})=>`<div class="it"><div class="av">${esc(initials(p.name))}</div>
+    <div class="tx"><b>${esc(p.name)}</b><small>${d!=null?fmtDist(d)+' door':'—'}</small></div>
+    <button class="ib" data-a="ren" data-id="${p.id}">✏</button><button class="ib" data-a="del" data-id="${p.id}">🗑</button>
+    <button class="ib go" data-a="go" data-id="${p.id}">Jao</button></div>`).join('');
+  el.querySelectorAll('button').forEach(b=>b.onclick=()=>{const id=b.dataset.id;
+    if(b.dataset.a==='go')goTo(id);else if(b.dataset.a==='ren')renamePlace(id);else delPlace(id)});
+}
+
+/* ---------- recording ---------- */
+const rec={on:false,pts:[],dist:0,start:0,lastT:0,timer:null,n:0};
+function recStart(resume){
+  if(!resume){rec.pts=[];rec.dist=0;rec.start=Date.now()}
+  rec.on=true;rec.lastT=0;
+  if(!recLine)recLine=L.polyline(rec.pts,{className:'recl',weight:6,opacity:.9,interactive:false}).addTo(map);else recLine.setLatLngs(rec.pts);
+  $('#recIdle').hidden=true;$('#recLive').hidden=false;
+  clearInterval(rec.timer);rec.timer=setInterval(updRecUI,1000);updRecUI();
+  if(me)recPoint();
+  wake(true);follow=true;updFollow();
+  toast(resume?'Recording phir se chalu':'⏺ Recording shuru — chalna shuru karo');
+}
+function recPoint(){
+  if(!me||me.acc>50)return;
+  const pt=[+me.lat.toFixed(6),+me.lng.toFixed(6)];
+  const last=rec.pts[rec.pts.length-1];
+  if(last){
+    const d=dist(last,pt);
+    if(d<5)return;
+    const dt=(me.t-rec.lastT)/1000;
+    if(rec.lastT&&dt>0&&d/dt>45)return; // GPS jump (>160 km/h) ignore
+    rec.dist+=d;
+  }
+  rec.pts.push(pt);rec.lastT=me.t;
+  recLine&&recLine.setLatLngs(rec.pts);
+  saveDraft();updRecUI();
+}
+function saveDraft(force){rec.n++;if(force||rec.n%4===0)save(LS.draft,{pts:rec.pts,dist:rec.dist,start:rec.start})}
+function updRecUI(){
+  if(!rec.on)return;
+  $('#rDist').textContent=fmtDist(rec.dist);
+  const s=Math.floor((Date.now()-rec.start)/1000);
+  $('#rTime').textContent=Math.floor(s/3600)?Math.floor(s/3600)+':'+String(Math.floor(s/60)%60).padStart(2,'0')+':'+String(s%60).padStart(2,'0'):Math.floor(s/60)+':'+String(s%60).padStart(2,'0');
+  $('#rAcc').textContent=me?'±'+Math.round(me.acc):'—';
+}
+function recEndUI(){
+  rec.on=false;clearInterval(rec.timer);
+  if(recLine){map.removeLayer(recLine);recLine=null}
+  $('#recIdle').hidden=false;$('#recLive').hidden=true;wake(false);
+}
+async function recStop(){
+  if(rec.pts.length<2){
+    if(await confirmBox('Raasta bahut chhota','Abhi tak koi raasta record nahi hua (GPS ya chalna kam). Recording band karein?','Band karo')){
+      recEndUI();localStorage.removeItem(LS.draft)}
+    return;
+  }
+  rec.on=false; // pause while saving
+  await saveTrackDialog();
+}
+async function saveTrackDialog(){
+  const a=rec.pts[0],b=rec.pts[rec.pts.length-1];
+  const pa=nearestPlace(a,60),pb=nearestPlace(b,60);
+  const r=await modal('Raasta save karo',`
+    <div class="mute">Doori: <b>${fmtDist(rec.dist)}</b> · ${rec.pts.length} points</div>
+    <label class="l">Shuruaat ki jagah ${pa?'(saved)':'(nayi banegi)'}</label>
+    <input type="text" data-k="from" value="${esc(pa?pa.name:nextName())}">
+    <label class="l">Aakhri jagah ${pb?'(saved)':'(nayi banegi)'}</label>
+    <input type="text" data-k="to" value="${esc(pb?pb.name:'')}" placeholder="jaise D, Dukaan">
+    <label class="l">Raaste ka naam (optional)</label>
+    <input type="text" data-k="name" value="" placeholder="jaise Ghar se Mandi">`,
+    [{label:'🗑 Delete',v:'del',cls:'alt'},{label:'↩ Chalu rakho',v:'cont',cls:'alt'},{label:'Save',v:'save'}]);
+  if(r.v==='cont'){recStart(true);return}
+  if(r.v==='del'){
+    if(await confirmBox('Pakka delete?','Ye recording hamesha ke liye hat jayegi.','Delete','red')){recEndUI();localStorage.removeItem(LS.draft);toast('Recording delete')}
+    else saveTrackDialog();
+    return;
+  }
+  const resolve=(name,pt,auto)=>{
+    name=(name||'').trim();
+    if(auto&&name.toLowerCase()===auto.name.toLowerCase())return auto;
+    if(!name)return null;
+    const ex=places.find(p=>p.name.toLowerCase()===name.toLowerCase()&&dist(pt,[p.lat,p.lng])<150);
+    return ex||addPlace(name,pt[0],pt[1]);
+  };
+  const f=resolve(r.vals.from,a,pa),t=resolve(r.vals.to||nextName(),b,pb);
+  const tr={id:uid(),name:r.vals.name||'',pts:rec.pts.slice(),dist:Math.round(rec.dist),
+    from:f?f.id:null,to:t?t.id:null,fromName:f?f.name:'',toName:t?t.name:'',at:Date.now()};
+  tracks.push(tr);
+  if(!save(LS.tracks,tracks)){tracks.pop();saveTrackDialog();return}
+  recEndUI();localStorage.removeItem(LS.draft);G=null;
+  drawTracks();drawPlaces();renderTracks();renderPlaces();renderNavSelects();
+  toast('✅ Raasta save: '+(tr.fromName||'?')+' → '+(tr.toName||'?'));
+}
+$('#recStartBtn').onclick=()=>recStart(false);
+$('#recStopBtn').onclick=recStop;
+
+/* ---------- tracks list ---------- */
+const trkLabel=t=>{const f=placeById(t.from),to=placeById(t.to);return (f?f.name:t.fromName||'?')+' → '+(to?to.name:t.toName||'?')};
+function renderTracks(){
+  const el=$('#trkList');
+  if(!tracks.length){el.innerHTML='<div class="empty">Koi raasta record nahi hua.</div>';return}
+  el.innerHTML=tracks.slice().reverse().map(t=>`<div class="it"><div class="av tr">🛣</div>
+    <div class="tx"><b>${esc(t.name||trkLabel(t))}</b><small>${t.name?esc(trkLabel(t))+' · ':''}${fmtDist(t.dist)} · ${new Date(t.at).toLocaleDateString('en-IN')}</small></div>
+    <button class="ib" data-a="ren" data-id="${t.id}">✏</button><button class="ib" data-a="del" data-id="${t.id}">🗑</button>
+    <button class="ib go" data-a="see" data-id="${t.id}">Dekho</button></div>`).join('');
+  el.querySelectorAll('button').forEach(b=>b.onclick=async()=>{
+    const t=tracks.find(x=>x.id===b.dataset.id);if(!t)return;
+    if(b.dataset.a==='see'){follow=false;updFollow();map.fitBounds(L.latLngBounds(t.pts),{padding:[30,30]});panel.classList.add('min')}
+    else if(b.dataset.a==='ren'){const n=await ask('Raaste ka naam','Naam',t.name||trkLabel(t));if(n){t.name=n;save(LS.tracks,tracks);renderTracks()}}
+    else if(await confirmBox('Raasta delete?',`"${esc(t.name||trkLabel(t))}" hata dein?`,'Delete','red')){
+      tracks=tracks.filter(x=>x.id!==t.id);save(LS.tracks,tracks);G=null;drawTracks();renderTracks();renderNavSelects()}
+  });
+}
+
+/* ---------- graph + shortest path ---------- */
+let G=null;
+const CELL=0.0002,LINK=18;
+function buildGraph(){
+  const nodes=[],adj=[],trk=[],idx=[];
+  const add=(la,ln,t,i)=>{nodes.push([la,ln]);adj.push([]);trk.push(t);idx.push(i);return nodes.length-1};
+  const edge=(a,b,w)=>{adj[a].push(b,w);adj[b].push(a,w)};
+  tracks.forEach((t,ti)=>{let prev=-1;t.pts.forEach((p,i)=>{const n=add(p[0],p[1],ti,i);if(prev>=0)edge(prev,n,Math.max(dist(nodes[prev],p),.1));prev=n})});
+  const grid=new Map(),key=(y,x)=>y+','+x;
+  nodes.forEach((p,i)=>{const k=key(Math.floor(p[0]/CELL),Math.floor(p[1]/CELL));let a=grid.get(k);if(!a)grid.set(k,a=[]);a.push(i)});
+  const near=(p,r,cb)=>{const cy=Math.floor(p[0]/CELL),cx=Math.floor(p[1]/CELL),sy=Math.ceil(r/22)+1,sx=Math.ceil(r/(22*Math.max(.3,Math.cos(p[0]*RAD))))+1;
+    for(let dy=-sy;dy<=sy;dy++)for(let dx=-sx;dx<=sx;dx++){const a=grid.get(key(cy+dy,cx+dx));if(!a)continue;
+      for(const j of a){const d=dist(p,nodes[j]);if(d<=r)cb(j,d)}}};
+  const T=nodes.length;
+  // junctions: alag raaste (ya same raaste ka loop) paas aaye to jod do
+  for(let i=0;i<T;i++)near(nodes[i],LINK,(j,d)=>{if(j<=i)return;if(trk[j]===trk[i]&&Math.abs(idx[j]-idx[i])<8)return;edge(i,j,Math.max(d,.5))});
+  // places → paas wale raaste se jodo
+  const placeNode={};
+  places.forEach(p=>{
+    const pt=[p.lat,p.lng],n=add(p.lat,p.lng,-1,-1);placeNode[p.id]=n;let c=0;
+    near(pt,50,(j,d)=>{edge(n,j,Math.max(d,.5));c++});
+    if(!c&&T){let bj=-1,bd=200;for(let j=0;j<T;j++){const d=dist(pt,nodes[j]);if(d<bd){bd=d;bj=j}}if(bj>=0)edge(n,bj,bd)}
+  });
+  G={nodes,adj,near,placeNode,T};return G;
+}
+class Heap{constructor(){this.k=[];this.v=[]}get size(){return this.k.length}
+  push(k,v){const K=this.k,V=this.v;let i=K.length;K.push(k);V.push(v);while(i>0){const p=(i-1)>>1;if(V[p]<=v)break;K[i]=K[p];V[i]=V[p];i=p}K[i]=k;V[i]=v}
+  pop(){const K=this.k,V=this.v,rk=K[0],rv=V[0],lk=K.pop(),lv=V.pop(),n=K.length;
+    if(n){let i=0;while(true){let c=2*i+1;if(c>=n)break;if(c+1<n&&V[c+1]<V[c])c++;if(V[c]>=lv)break;K[i]=K[c];V[i]=V[c];i=c}K[i]=lk;V[i]=lv}
+    return [rk,rv]}}
+function connect(ll){
+  const out=[];G.near(ll,40,(j,d)=>out.push([j,d]));
+  if(out.length)return {starts:out,gap:0,gapPt:null};
+  let bj=-1,bd=Infinity;for(let j=0;j<G.nodes.length;j++){const d=dist(ll,G.nodes[j]);if(d<bd){bd=d;bj=j}}
+  return bj<0?null:{starts:[[bj,bd]],gap:bd,gapPt:G.nodes[bj]};
+}
+function findRoute(fromLL,fromPlaceId,destId){
+  if(!G)buildGraph();
+  const t=G.placeNode[destId];if(t==null)return {err:'Destination nahi mili'};
+  if(!G.T)return {err:'Abhi koi raasta record nahi hua'};
+  let c;
+  if(fromPlaceId){const s=G.placeNode[fromPlaceId];if(s==null)return {err:'Start jagah nahi mili'};c={starts:[[s,0]],gap:0,gapPt:null}}
+  else{c=connect(fromLL);if(!c)return {err:'Raasta nahi mila'}}
+  const N=G.nodes.length,D=new Float64Array(N).fill(Infinity),P=new Int32Array(N).fill(-1),h=new Heap();
+  c.starts.forEach(([n,w])=>{if(w<D[n]){D[n]=w;P[n]=-2;h.push(n,w)}});
+  while(h.size){const [u,du]=h.pop();if(du>D[u])continue;if(u===t)break;
+    const a=G.adj[u];for(let k=0;k<a.length;k+=2){const v=a[k],nd=du+a[k+1];if(nd<D[v]){D[v]=nd;P[v]=u;h.push(v,nd)}}}
+  if(D[t]===Infinity)return {err:'noroute'};
+  const pts=[];let u=t;while(u>=0){pts.push(G.nodes[u]);u=P[u]}pts.reverse();
+  const gapD=c.gap>25?c.gap:0;
+  return {pts,total:D[t]-gapD,gap:gapD,gapPt:gapD?c.gapPt:null};
+}
+function analyse(pts){
+  const cum=[0];for(let i=1;i<pts.length;i++)cum.push(cum[i-1]+dist(pts[i-1],pts[i]));
+  const turns=[],look=15,n=pts.length;
+  for(let i=1;i<n-1;i++){
+    let j=i-1;while(j>0&&cum[i]-cum[j]<look)j--;let k=i+1;while(k<n-1&&cum[k]-cum[i]<look)k++;
+    if(cum[i]-cum[j]<6||cum[k]-cum[i]<6)continue;
+    const ang=((bearing(pts[i],pts[k])-bearing(pts[j],pts[i])+540)%360)-180;
+    if(Math.abs(ang)<40)continue;
+    const last=turns[turns.length-1];
+    if(last&&cum[i]-last.at<25){if(Math.abs(ang)>Math.abs(last.ang)){last.i=i;last.at=cum[i];last.ang=ang}continue}
+    turns.push({i,at:cum[i],ang});
+  }
+  return {cum,turns};
+}
+const turnArrow=a=>Math.abs(a)>=140?'⤸':a>0?'↱':'↰';
+const turnHi=a=>Math.abs(a)>=140?'वापस मुड़िए':a>0?'दाएँ मुड़िए':'बाएँ मुड़िए';
+const turnUi=a=>Math.abs(a)>=140?'U-turn lo':a>0?'Right mudo':'Left mudo';
+
+/* ---------- navigate tab ---------- */
+const nav={on:false,destId:null,fromPlace:null,r:null,cum:null,turns:null,spoken:{},lastRe:0,lastIdx:0};
+function renderNavSelects(){
+  const has=places.length>0&&tracks.length>0;
+  $('#navEmpty').hidden=has;$('#navForm').hidden=!has;
+  if(!has)return;
+  const ds=$('#destSel'),fs=$('#fromSel'),dv=ds.value,fv=fs.value;
+  let arr=places.slice();
+  if(me)arr.sort((a,b)=>dist([me.lat,me.lng],[a.lat,a.lng])-dist([me.lat,me.lng],[b.lat,b.lng]));
+  ds.innerHTML='<option value="">— Jagah chuno —</option>'+arr.map(p=>`<option value="${p.id}">${esc(p.name)}${me?' ('+fmtDist(dist([me.lat,me.lng],[p.lat,p.lng]))+')':''}</option>`).join('');
+  fs.innerHTML='<option value="gps">📡 Meri abhi ki location (GPS)</option>'+arr.map(p=>`<option value="${p.id}">${esc(p.name)}</option>`).join('');
+  if(dv&&placeById(dv))ds.value=dv;if(fv&&(fv==='gps'||placeById(fv)))fs.value=fv;
+  document.querySelectorAll('#modeChips .chip').forEach(c=>c.classList.toggle('act',c.dataset.m===settings.mode));
+}
+document.querySelectorAll('#modeChips .chip').forEach(c=>c.onclick=()=>{settings.mode=c.dataset.m;saveSettings();renderNavSelects();if(nav.r)renderRouteCard()});
+
+function drawRoute(){
+  routeLayer.clearLayers();if(!nav.r)return;
+  L.polyline(nav.r.pts,{className:'rtcase',weight:11,opacity:.9,interactive:false}).addTo(routeLayer);
+  L.polyline(nav.r.pts,{className:'rt',weight:7,opacity:1,interactive:false}).addTo(routeLayer);
+  if(nav.r.gapPt&&me)L.polyline([[me.lat,me.lng],nav.r.gapPt],{className:'gap',weight:4,dashArray:'6 8',interactive:false}).addTo(routeLayer);
+}
+function renderRouteCard(){
+  const r=nav.r,el=$('#routeCard');if(!r){el.innerHTML='';return}
+  const dp=placeById(nav.destId),tot=r.total+r.gap,sec=tot/SPEED[settings.mode];
+  el.innerHTML=`<div class="card">
+    <div class="mute">${esc(nav.fromPlace?placeById(nav.fromPlace).name:'Aapki location')} → <b>${esc(dp?dp.name:'')}</b></div>
+    <div class="row" style="margin-top:4px"><div class="big">${fmtDist(tot)}</div><div class="big" style="text-align:right">${fmtDur(sec)}</div></div>
+    <div class="mute">${MODE_NAME[settings.mode]} se · apne record kiye raaston par · ${nav.turns.length} mod</div>
+    ${r.gap?`<div class="warn" style="margin:10px 0 0">Aap kisi recorded raaste par nahi ho — pehle <b>${fmtDist(r.gap)}</b> door orange dotted line wale point tak jao.</div>`:''}
+    <div class="row"><button class="btn alt" id="clrBtn">✕ Hatao</button><button class="btn" id="goBtn">▶ Navigation</button></div></div>`;
+  $('#clrBtn').onclick=clearRoute;$('#goBtn').onclick=startNav;
+}
+function setRoute(r){nav.r=r;const a=analyse(r.pts);nav.cum=a.cum;nav.turns=a.turns;nav.spoken={};nav.lastIdx=0}
+function showRoute(){
+  const destId=$('#destSel').value,from=$('#fromSel').value;
+  if(!destId){toast('Pehle "Kahan jana hai" chuno');return}
+  if(from===destId){toast('Start aur destination same hai');return}
+  if(from==='gps'&&!me){toast('GPS signal ka intezaar… ya "Kahan se" mein jagah chuno',3500);return}
+  nav.destId=destId;nav.fromPlace=from==='gps'?null:from;
+  const r=findRoute(me?[me.lat,me.lng]:null,nav.fromPlace,destId);
+  if(r.err){
+    nav.r=null;routeLayer.clearLayers();
+    $('#routeCard').innerHTML=`<div class="warn" style="margin-top:12px">${r.err==='noroute'?
+      'In dono jagah ke beech koi recorded raasta juda hua nahi hai. Pehle in ke beech ka raasta record karo (dono raaste kahin na kahin milne chahiye).':esc(r.err)}</div>`;
+    drawPlaces();return;
+  }
+  if(r.total+r.gap<20&&!nav.fromPlace){toast('Aap pahle se wahi par ho 🙂');}
+  setRoute(r);drawRoute();drawPlaces();renderRouteCard();
+  follow=false;updFollow();
+  const b=L.latLngBounds(r.pts);if(me&&!nav.fromPlace)b.extend([me.lat,me.lng]);
+  map.fitBounds(b,{padding:[40,40],maxZoom:18});
+}
+$('#showRouteBtn').onclick=showRoute;
+function clearRoute(){if(nav.on)stopNav(true);nav.r=null;nav.destId=null;routeLayer.clearLayers();$('#routeCard').innerHTML='';drawPlaces()}
+
+/* ---------- live navigation ---------- */
+function startNav(){
+  if(!me){toast('Navigation ke liye GPS chahiye');return}
+  if(nav.fromPlace){ // ab GPS se chalo
+    const r=findRoute([me.lat,me.lng],null,nav.destId);
+    if(r.err){toast(r.err==='noroute'?'Aapki location se raasta juda nahi hai':r.err,3500);return}
+    nav.fromPlace=null;setRoute(r);drawRoute();
+  }
+  nav.on=true;nav.lastRe=Date.now();
+  $('#navBar').classList.add('on');panel.classList.add('min');
+  follow=true;updFollow();map.setView([me.lat,me.lng],18);wake(true);
+  const dp=placeById(nav.destId);
+  speak(`${dp?dp.name:''} के लिए नेविगेशन शुरू। कुल दूरी ${spokenDist(nav.r.total+nav.r.gap)}।`);
+  navUpdate();
+}
+function spokenDist(m){return m<1000?Math.round(m/10)*10+' मीटर':(m/1000).toFixed(1)+' किलोमीटर'}
+function stopNav(silent){
+  nav.on=false;$('#navBar').classList.remove('on');panel.classList.remove('min');wake(false);
+  if(!silent)toast('Navigation band');
+}
+$('#nStop').onclick=()=>stopNav();
+function navUpdate(){
+  if(!nav.on||!nav.r||!me)return;
+  const pos=[me.lat,me.lng],pts=nav.r.pts,dp=placeById(nav.destId);
+  if(!dp){stopNav();return}
+  // pahunch gaye?
+  const toDest=dist(pos,[dp.lat,dp.lng]);
+  if(toDest<25){
+    speak(`आप पहुँच गए — ${dp.name}`);toast('🎉 Aap pahunch gaye: '+dp.name,4000);
+    stopNav(true);clearRoute();return;
+  }
+  // route par sabse paas ka point
+  let bi=0,bd=Infinity;
+  for(let i=0;i<pts.length;i++){const d=dist(pos,pts[i]);if(d<bd){bd=d;bi=i}}
+  // raaste se bahar? (gap wala start chhod kar)
+  const offLimit=Math.max(40,me.acc*1.2);
+  if(bd>offLimit&&!(nav.r.gapPt&&bi===0)&&Date.now()-nav.lastRe>8000){
+    nav.lastRe=Date.now();
+    const r=findRoute(pos,null,nav.destId);
+    if(!r.err){setRoute(r);drawRoute();speak('रास्ता दोबारा बनाया गया');return navUpdate()}
+  }
+  nav.lastIdx=bi;
+  const done=nav.cum[bi],rem=Math.max(0,nav.cum[nav.cum.length-1]-done)+(bi===0&&nav.r.gapPt?bd:0);
+  $('#nRem').textContent=`Baaki: ${fmtDist(rem)} · ${fmtDur(rem/SPEED[settings.mode])}`;
+  if(bi===0&&nav.r.gapPt&&bd>25){
+    $('#nArr').textContent='↗';$('#nDist').textContent=fmtDist(bd);$('#nIns').textContent='Pehle orange line wale raaste tak jao';return;
+  }
+  const ti=nav.turns.findIndex(t=>t.at>done+5);
+  if(ti<0){
+    const d=nav.cum[nav.cum.length-1]-done;
+    $('#nArr').textContent='📍';$('#nDist').textContent=fmtDist(d);$('#nIns').textContent='Seedha chalo — '+dp.name+' aayega';
+    if(d<=150&&d>40&&!nav.spoken.end){nav.spoken.end=1;speak(`${spokenDist(d)} बाद ${dp.name} आएगा`)}
+    return;
+  }
+  const t=nav.turns[ti],d=t.at-done;
+  $('#nArr').textContent=turnArrow(t.ang);$('#nDist').textContent=fmtDist(d);$('#nIns').textContent=turnUi(t.ang);
+  if(d<=130&&d>45&&!nav.spoken[ti+'f']){nav.spoken[ti+'f']=1;speak(`${spokenDist(d)} बाद ${turnHi(t.ang)}`)}
+  if(d<=35&&!nav.spoken[ti+'n']){nav.spoken[ti+'n']=1;nav.spoken[ti+'f']=1;speak('अब '+turnHi(t.ang))}
+}
+
+/* ---------- settings, backup ---------- */
+$('#voiceTgl').checked=settings.voice;
+$('#voiceTgl').onchange=e=>{settings.voice=e.target.checked;saveSettings();if(settings.voice)speak('आवाज़ चालू')};
+$('#expBtn').onclick=async()=>{
+  const data=JSON.stringify({app:'meraraasta',v:1,at:new Date().toISOString(),places,tracks});
+  const name='mera-raasta-backup-'+new Date().toISOString().slice(0,10)+'.json';
+  try{const f=new File([data],name,{type:'application/json'});
+    if(navigator.canShare&&navigator.canShare({files:[f]})){await navigator.share({files:[f],title:'Mera Raasta backup'});return}}catch(e){if(e&&e.name==='AbortError')return}
+  const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([data],{type:'application/json'}));a.download=name;
+  document.body.appendChild(a);a.click();setTimeout(()=>{URL.revokeObjectURL(a.href);a.remove()},1500);toast('Backup download ho raha hai');
+};
+$('#impBtn').onclick=()=>$('#impFile').click();
+$('#impFile').onchange=async e=>{
+  const f=e.target.files[0];e.target.value='';if(!f)return;
+  try{const d=JSON.parse(await f.text());if(d.app!=='meraraasta')throw 0;
+    const pi=new Set(places.map(p=>p.id)),ti=new Set(tracks.map(t=>t.id));
+    let np=0,nt=0;(d.places||[]).forEach(p=>{if(!pi.has(p.id)){places.push(p);np++}});(d.tracks||[]).forEach(t=>{if(!ti.has(t.id)){tracks.push(t);nt++}});
+    save(LS.places,places);save(LS.tracks,tracks);G=null;drawTracks();drawPlaces();renderTracks();renderPlaces();renderNavSelects();
+    toast(`Restore: ${np} jagah, ${nt} raaste jude`,3500);
+  }catch(err){toast('Ye Mera Raasta ki backup file nahi hai')}
+};
+
+/* ---------- install ---------- */
+let deferredPrompt=null;
+const standalone=()=>matchMedia('(display-mode: standalone)').matches||navigator.standalone;
+window.addEventListener('beforeinstallprompt',e=>{e.preventDefault();deferredPrompt=e;if(!standalone())$('#installBtn').hidden=false});
+window.addEventListener('appinstalled',()=>{$('#installBtn').hidden=true;deferredPrompt=null;toast('✅ App install ho gaya — home screen par dekho')});
+async function doInstall(){
+  if(standalone()){toast('App pahle se install hai ✓');return}
+  if(deferredPrompt){deferredPrompt.prompt();const r=await deferredPrompt.userChoice;deferredPrompt=null;$('#installBtn').hidden=true;
+    if(r.outcome!=='accepted')toast('Install cancel hua');return}
+  modal('App install kaise karein','<div class="mute" style="font-size:14px;line-height:1.6">Chrome mein upar right ⋮ menu dabao → <b>"Add to Home screen"</b> ya <b>"Install app"</b> chuno → <b>Install</b>.<br><br>Phir home screen par <b>Mera Raasta</b> ka icon aa jayega.</div>',[{label:'Theek hai',v:1}]);
+}
+$('#installBtn').onclick=doInstall;$('#install2Btn').onclick=doInstall;
+if(!standalone())setTimeout(()=>{if(!deferredPrompt)$('#installBtn').hidden=false},4000);
+
+/* ---------- start ---------- */
+$('#ver').textContent=' '+VERSION;$('#ver2').textContent=VERSION;
+drawTracks();drawPlaces();renderNavSelects();renderPlaces();renderTracks();syncPanel();
+startGPS();
+setInterval(()=>{if(!nav.on&&!rec.on&&document.querySelector('#s-nav.act')&&document.activeElement.tagName!=='SELECT')renderNavSelects()},20000);
+(async()=>{ // adhuri recording?
+  const d=load(LS.draft,null);
+  if(d&&d.pts&&d.pts.length>=2){
+    const r=await modal('Adhuri recording mili',`<div class="mute">Pichli recording (${fmtDist(d.dist||0)}) save nahi hui thi.</div>`,
+      [{label:'🗑 Hatao',v:'del',cls:'alt'},{label:'↩ Chalu',v:'cont',cls:'alt'},{label:'Save',v:'save'}]);
+    rec.pts=d.pts;rec.dist=d.dist||0;rec.start=d.start||Date.now();
+    if(r.v==='del'){localStorage.removeItem(LS.draft);rec.pts=[]}
+    else if(r.v==='cont'){showTab('rec');recStart(true)}
+    else saveTrackDialog();
+  }
+})();
+if('serviceWorker' in navigator)window.addEventListener('load',()=>navigator.serviceWorker.register('sw.js').catch(()=>{}));
+</script>
+</body>
+</html>
