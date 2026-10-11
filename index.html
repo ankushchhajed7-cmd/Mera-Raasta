@@ -3,6 +3,10 @@
   MERA RAASTA — Personal Route Map (PWA)
   by Ankush New Vision
   ------------------------------------------------------------
+  v1.01 (2026-10-11)
+   - GPS na mile to saaf steps + "Dobara try karo" button
+   - 12 sec mein GPS fix na mile to tower/WiFi wali andaazan location
+   - Dark mode mein halke buttons ka contrast theek kiya
   v1.00 (2026-10-11)
    - GPS se raasta record karna (A→B→C→D), beech mein jagah mark karna
    - Saare recorded raaston ka network (graph) + shortest path (Dijkstra)
@@ -92,7 +96,7 @@ select:focus,input[type=text]:focus{border-color:var(--brand2)}
 .big{font-size:22px;font-weight:800}
 .mute{color:var(--mute);font-size:12.5px;line-height:1.45}
 .warn{background:#fff3e6;color:#8a4a00;border-radius:12px;padding:10px 12px;font-size:13px;margin-bottom:10px;line-height:1.4}
-@media (prefers-color-scheme:dark){.warn{background:#3a2a14;color:#ffcf99}}
+@media (prefers-color-scheme:dark){.warn{background:#3a2a14;color:#ffcf99}.btn.alt{background:#1f3a33;color:#7ce3c6}.chip{color:var(--ink)}}
 .empty{text-align:center;padding:18px 8px;color:var(--mute);font-size:13.5px;line-height:1.5}
 
 .list .it{display:flex;align-items:center;gap:10px;padding:10px 0;border-bottom:1px solid var(--line)}
@@ -273,7 +277,7 @@ select:focus,input[type=text]:focus{border-color:var(--brand2)}
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
 <script>
 'use strict';
-const VERSION='v1.00';
+const VERSION='v1.01';
 const $=s=>document.querySelector(s);
 const esc=s=>String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const uid=()=>Date.now().toString(36)+Math.random().toString(36).slice(2,6);
@@ -374,10 +378,17 @@ document.querySelectorAll('#tabs button').forEach(b=>b.onclick=()=>showTab(b.dat
 /* ---------- GPS ---------- */
 let me=null,follow=true,lastSaveLoc=0,firstFix=true;
 function setGps(cls,txt){const p=$('#gpsPill');p.className='pill '+cls;p.querySelector('span').textContent=txt}
+let watchId=null,coarseTimer=null;
 function startGPS(){
   if(!('geolocation' in navigator)){setGps('bad','GPS nahi');return}
-  navigator.geolocation.watchPosition(onPos,onGpsErr,{enableHighAccuracy:true,maximumAge:1000,timeout:25000});
+  stopGPS();
+  watchId=navigator.geolocation.watchPosition(onPos,onGpsErr,{enableHighAccuracy:true,maximumAge:2000,timeout:30000});
+  // 12 sec mein GPS fix na mile to tower/WiFi wali andaazan location se kaam chalao
+  coarseTimer=setTimeout(()=>{if(!me)navigator.geolocation.getCurrentPosition(p=>{if(!me)onPos(p)},()=>{},
+    {enableHighAccuracy:false,maximumAge:60000,timeout:20000})},12000);
 }
+function stopGPS(){if(watchId!=null)navigator.geolocation.clearWatch(watchId);watchId=null;clearTimeout(coarseTimer)}
+function retryGPS(){$('#gpsWarn').innerHTML='';setGps('weak','GPS dhoondh raha…');startGPS();toast('GPS dobara dhoondh raha hai…')}
 function onPos(p){
   const c=p.coords;
   me={lat:c.latitude,lng:c.longitude,acc:c.accuracy,t:p.timestamp||Date.now()};
@@ -394,10 +405,15 @@ function onPos(p){
   if(nav.on)navUpdate();
 }
 function onGpsErr(e){
-  if(e.code===1){setGps('bad','Permission nahi');
-    $('#gpsWarn').innerHTML='<div class="warn">📍 Location permission band hai. Chrome mein address bar ke 🔒 icon → <b>Permissions → Location → Allow</b> karo, phir app reload karo. Phone ki Location (GPS) bhi ON honi chahiye.</div>';}
-  else if(e.code===2)setGps('bad','Signal nahi');
-  else setGps('weak','GPS dhoondh raha…');
+  if(e.code!==1&&me&&Date.now()-me.t<60000)return; // fix pehle se hai, chhoti rukawat ignore
+  const retry='<button class="btn sm" onclick="retryGPS()">🔄 Dobara try karo</button>';
+  if(e.code===1){
+    setGps('bad','Permission nahi');
+    $('#gpsWarn').innerHTML='<div class="warn">📍 <b>Location permission band hai.</b><br>Chrome mein address bar ke 🔒 icon → <b>Permissions → Location → Allow</b> karo. Phone ki Location (GPS) bhi ON honi chahiye.'+retry+'</div>';
+  }else{
+    setGps(e.code===2?'bad':'weak',e.code===2?'Signal nahi':'GPS dhoondh raha…');
+    $('#gpsWarn').innerHTML='<div class="warn">📡 <b>GPS location nahi mil rahi.</b> Ye check karo:<br>1. Phone ki <b>Location</b> ON hai? (upar se notification bar neeche kheencho → Location)<br>2. Location settings mein <b>Google Location Accuracy</b> ON rakho.<br>3. Ghar ke andar ho to khidki ke paas ya bahar jao — GPS ko khula aasmaan chahiye.<br>4. Chrome → Site settings → Location → is site ko <b>Allow</b> aur <b>Precise</b> rakho.'+retry+'</div>';
+  }
 }
 function updFollow(){$('#locBtn').classList.toggle('on',follow)}
 map.on('dragstart',()=>{follow=false;updFollow()});
