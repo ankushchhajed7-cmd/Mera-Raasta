@@ -1,0 +1,19 @@
+{
+  "name": "Mera Raasta - Route Map",
+  "short_name": "Mera Raasta",
+  "description": "Apne record kiye raaston par GPS navigation — kahin se bhi, kisi bhi saved jagah tak.",
+  "id": "./",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#0b5d4e",
+  "theme_color": "#0b5d4e",
+  "lang": "hi",
+  "categories": ["navigation", "travel", "utilities"],
+  "icons": [
+    { "src": "icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}
