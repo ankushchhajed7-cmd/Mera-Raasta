@@ -3,6 +3,9 @@
   MERA RAASTA — Personal Route Map (PWA)
   by Ankush New Vision
   ------------------------------------------------------------
+  v1.04 (2026-10-12)
+   - Bug fix: app ki do copies khuli hon to naya save purani jagah/raasta mita deta tha
+   - Har save se pehle taaza data, doosri copy ke badlaav turant dikhte hain
   v1.03 (2026-10-12)
    - APK mein background GPS: screen off / jeb mein bhi raasta record (notification ke saath)
    - App band hokar khule to chalu recording apne aap jud jaati hai
@@ -289,7 +292,7 @@ select:focus,input[type=text]:focus{border-color:var(--brand2)}
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
 <script>
 'use strict';
-const VERSION='v1.03';
+const VERSION='v1.04';
 const $=s=>document.querySelector(s);
 const esc=s=>String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const uid=()=>Date.now().toString(36)+Math.random().toString(36).slice(2,6);
@@ -300,6 +303,10 @@ function load(k,d){try{const v=localStorage.getItem(k);return v?JSON.parse(v):d}
 function save(k,v){try{localStorage.setItem(k,JSON.stringify(v));return true}catch(e){toast('Storage full! Backup lekar purane raaste delete karo');return false}}
 let places=load(LS.places,[]);
 let tracks=load(LS.tracks,[]);
+/* Har badlaav se pehle storage se taaza list lo — app ki doosri copy (Chrome tab / installed app)
+   ne jo save kiya ho woh purani list se overwrite na ho */
+function freshPlaces(){places=load(LS.places,[]);return places}
+function freshTracks(){tracks=load(LS.tracks,[]);return tracks}
 const settings=Object.assign({voice:true,mode:'bike',last:null},load(LS.settings,{}));
 const saveSettings=()=>save(LS.settings,settings);
 
@@ -459,7 +466,7 @@ if('speechSynthesis' in window)speechSynthesis.getVoices();
 function nearestPlace(ll,maxD){let best=null,bd=maxD;places.forEach(p=>{const d=dist(ll,[p.lat,p.lng]);if(d<bd){bd=d;best=p}});return best}
 function addPlace(name,lat,lng){
   const p={id:uid(),name:name,lat:+lat.toFixed(6),lng:+lng.toFixed(6),at:Date.now()};
-  places.push(p);save(LS.places,places);G=null;drawPlaces();renderPlaces();renderNavSelects();return p;
+  freshPlaces();places.push(p);save(LS.places,places);G=null;drawPlaces();renderPlaces();renderNavSelects();return p;
 }
 const nextName=()=>{const L='ABCDEFGHIJKLMNOPQRSTUVWXYZ';const used=new Set(places.map(p=>p.name.toUpperCase()));
   for(const c of L)if(!used.has(c))return c;return 'Jagah '+(places.length+1)};
@@ -489,11 +496,12 @@ async function placeMenu(id){
     [{label:'✏ Naam',v:'ren',cls:'alt'},{label:'🗑',v:'del',cls:'alt'},{label:'🧭 Yahan jao',v:'go'}]);
   if(r.v==='go')goTo(id);else if(r.v==='ren')renamePlace(id);else if(r.v==='del')delPlace(id);
 }
-async function renamePlace(id){const p=placeById(id);const n=await ask('Naam badlo','Naya naam',p.name);if(!n)return;
+async function renamePlace(id){const p0=placeById(id);if(!p0)return;const n=await ask('Naam badlo','Naya naam',p0.name);if(!n)return;
+  freshPlaces();const p=placeById(id);if(!p){reloadData();return}
   p.name=n;save(LS.places,places);drawPlaces();renderPlaces();renderTracks();renderNavSelects()}
 async function delPlace(id){const p=placeById(id);
   if(!await confirmBox('Jagah delete?',`"${esc(p.name)}" hata dein? Raaste (lines) saved rahenge.`,'Delete','red'))return;
-  places=places.filter(x=>x.id!==id);save(LS.places,places);G=null;if(nav.destId===id)clearRoute();
+  freshPlaces();places=places.filter(x=>x.id!==id);save(LS.places,places);G=null;if(nav.destId===id)clearRoute();
   drawPlaces();renderPlaces();renderNavSelects()}
 function goTo(id){showTab('nav');$('#destSel').value=id;$('#fromSel').value='gps';showRoute()}
 
@@ -618,7 +626,7 @@ async function saveTrackDialog(){
   const f=resolve(r.vals.from,a,pa),t=resolve(r.vals.to||nextName(),b,pb);
   const tr={id:uid(),name:r.vals.name||'',pts:rec.pts.slice(),dist:Math.round(rec.dist),
     from:f?f.id:null,to:t?t.id:null,fromName:f?f.name:'',toName:t?t.name:'',at:Date.now()};
-  tracks.push(tr);
+  freshTracks();tracks.push(tr);
   if(!save(LS.tracks,tracks)){tracks.pop();saveTrackDialog();return}
   recEndUI();localStorage.removeItem(LS.draft);G=null;
   drawTracks();drawPlaces();renderTracks();renderPlaces();renderNavSelects();
@@ -639,9 +647,9 @@ function renderTracks(){
   el.querySelectorAll('button').forEach(b=>b.onclick=async()=>{
     const t=tracks.find(x=>x.id===b.dataset.id);if(!t)return;
     if(b.dataset.a==='see'){follow=false;updFollow();map.fitBounds(L.latLngBounds(t.pts),{padding:[30,30]});panel.classList.add('min')}
-    else if(b.dataset.a==='ren'){const n=await ask('Raaste ka naam','Naam',t.name||trkLabel(t));if(n){t.name=n;save(LS.tracks,tracks);renderTracks()}}
+    else if(b.dataset.a==='ren'){const n=await ask('Raaste ka naam','Naam',t.name||trkLabel(t));if(n){freshTracks();const t2=tracks.find(x=>x.id===t.id);if(t2){t2.name=n;save(LS.tracks,tracks)}renderTracks()}}
     else if(await confirmBox('Raasta delete?',`"${esc(t.name||trkLabel(t))}" hata dein?`,'Delete','red')){
-      tracks=tracks.filter(x=>x.id!==t.id);save(LS.tracks,tracks);G=null;drawTracks();renderTracks();renderNavSelects()}
+      freshTracks();tracks=tracks.filter(x=>x.id!==t.id);save(LS.tracks,tracks);G=null;drawTracks();renderTracks();renderNavSelects()}
   });
 }
 
@@ -846,6 +854,7 @@ $('#impBtn').onclick=()=>$('#impFile').click();
 $('#impFile').onchange=async e=>{
   const f=e.target.files[0];e.target.value='';if(!f)return;
   try{const d=JSON.parse(await f.text());if(d.app!=='meraraasta')throw 0;
+    freshPlaces();freshTracks();
     const pi=new Set(places.map(p=>p.id)),ti=new Set(tracks.map(t=>t.id));
     let np=0,nt=0;(d.places||[]).forEach(p=>{if(!pi.has(p.id)){places.push(p);np++}});(d.tracks||[]).forEach(t=>{if(!ti.has(t.id)){tracks.push(t);nt++}});
     save(LS.places,places);save(LS.tracks,tracks);G=null;drawTracks();drawPlaces();renderTracks();renderPlaces();renderNavSelects();
@@ -866,6 +875,16 @@ async function doInstall(){
 }
 $('#installBtn').onclick=doInstall;$('#install2Btn').onclick=doInstall;
 if(!standalone())setTimeout(()=>{if(!deferredPrompt)$('#installBtn').hidden=false},4000);
+
+/* ---------- copies ke beech data sync ---------- */
+function reloadData(){
+  freshPlaces();freshTracks();G=null;
+  if(nav.destId&&!placeById(nav.destId))clearRoute();
+  drawTracks();drawPlaces();renderPlaces();renderTracks();
+  if(document.activeElement.tagName!=='SELECT')renderNavSelects();
+}
+window.addEventListener('storage',e=>{if(e.key===LS.places||e.key===LS.tracks||e.key===null)reloadData()});
+document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible')reloadData()});
 
 /* ---------- refresh ---------- */
 async function hardRefresh(){
